@@ -24,7 +24,27 @@ const std::vector<const char*> validation_layers = {
   const bool enable_validation_layers = true;
 #endif
 
+VkResult create_debug_report_callback_ext(
+    VkInstance instance,
+    const VkDebugReportCallbackCreateInfoEXT* p_create_info,
+    const VkAllocationCallbacks* p_allocator,
+    VkDebugReportCallbackEXT* p_callback) {
+    auto func = (PFN_vkCreateDebugReportCallbackEXT) vkGetInstanceProcAddr(instance, "vkCreateDebugReportCallbackEXT");
+    if (func != nullptr) {
+        return func(instance, p_create_info, p_allocator, p_callback);
+    } else {
+        return VK_ERROR_EXTENSION_NOT_PRESENT;
+    }
+}
 
+void destroy_debug_report_callback_ext(VkInstance instance,
+    VkDebugReportCallbackEXT callback,
+    const VkAllocationCallbacks* p_allocator) {
+    auto func = (PFN_vkDestroyDebugReportCallbackEXT) vkGetInstanceProcAddr(instance, "vkDestroyDebugReportCallbackEXT");
+    if (func != nullptr) {
+        func(instance, callback, p_allocator);
+    }
+}
 
 class HelloTriangleApplication
 {
@@ -40,14 +60,25 @@ public:
 private:
   GLFWwindow* window;
   VkInstance instance;
+  VkDebugReportCallbackEXT callback;
 
+
+  void init_window()
+  {
+    glfwInit();
+
+    glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
+    glfwWindowHint(GLFW_RESIZABLE, GLFW_FALSE);
+
+    window = glfwCreateWindow(WIDTH, HEIGHT, "vulkan", nullptr, nullptr);
+  }
 
   static VKAPI_ATTR VkBool32 VKAPI_CALL debug_callback(
       VkDebugReportFlagsEXT flags,
       VkDebugReportObjectTypeEXT obj_type,
       uint64_t obj,
       size_t location,
-      uint32_t code,
+      int32_t code,
       const char* layer_prefix,
       const char* msg,
       void* user_data) {
@@ -143,20 +174,17 @@ private:
     app_info.engineVersion      = VK_MAKE_VERSION(1,0,0);
     app_info.apiVersion         = VK_API_VERSION_1_0;
 
-
     VkInstanceCreateInfo create_info = {};
     create_info.sType                = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO;
     create_info.pApplicationInfo     = &app_info;
 
-
     uint32_t glfw_extension_count = 0;
     const char** glfw_extensions;
-
-    glfw_extensions = glfwGetRequiredInstanceExtensions(&glfw_extension_count);
 
     auto extensions = get_required_extensions();
     create_info.enabledExtensionCount   = static_cast<uint32_t>(extensions.size());
     create_info.ppEnabledExtensionNames = extensions.data();
+
     if (enable_validation_layers) {
       create_info.enabledLayerCount     = static_cast<uint32_t>(validation_layers.size());
       create_info.ppEnabledLayerNames   = validation_layers.data();
@@ -168,25 +196,27 @@ private:
       throw std::runtime_error("failed to create instance!");
     }
 
-
-    uint32_t extension_count = 0;
-    vkEnumerateInstanceExtensionProperties(nullptr, &extension_count, nullptr);
-
   }
 
-  void init_window()
+  void setup_debug_callback()
   {
-    glfwInit();
+    if (!enable_validation_layers) return;
 
-    glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
-    glfwWindowHint(GLFW_RESIZABLE, GLFW_FALSE);
+    VkDebugReportCallbackCreateInfoEXT create_info = {};
+    create_info.sType                = VK_STRUCTURE_TYPE_DEBUG_REPORT_CALLBACK_CREATE_INFO_EXT;
+    create_info.flags                = VK_DEBUG_REPORT_ERROR_BIT_EXT | VK_DEBUG_REPORT_WARNING_BIT_EXT;
+    create_info.pfnCallback          = debug_callback;
 
-    window = glfwCreateWindow(WIDTH, HEIGHT, "vulkan", nullptr, nullptr);
+    if (create_debug_report_callback_ext(instance, &create_info, nullptr, &callback) != VK_SUCCESS) {
+      throw std::runtime_error("failed to set up debug callback!");
+    }
   }
+
 
   void init_vulkan()
   {
     create_instance();
+    setup_debug_callback();
   }
 
   void main_loop()
@@ -198,6 +228,10 @@ private:
 
   void cleanup()
   {
+    if (enable_validation_layers) {
+      destroy_debug_report_callback_ext(instance, callback, nullptr);
+    }
+
     vkDestroyInstance(instance, nullptr);
 
     glfwDestroyWindow(window);
