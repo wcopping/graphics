@@ -61,6 +61,7 @@ private:
   GLFWwindow* window;
   VkInstance instance;
   VkDebugReportCallbackEXT callback;
+  VkPhysicalDevice physical_device = VK_NULL_HANDLE;
 
 
   void init_window()
@@ -217,6 +218,7 @@ private:
   {
     create_instance();
     setup_debug_callback();
+    pick_physical_device();
   }
 
   void main_loop()
@@ -237,6 +239,112 @@ private:
     glfwDestroyWindow(window);
 
     glfwTerminate();
+  }
+
+  // look for and select graphics card for use by vulkan api features
+  // we need to store this device as a VkPhysicalDevice but we do not need to
+  // do anything special to destroy it once we are done as that is taken care of
+  // already, implicitly, when we destroy the VkInstance
+  void pick_physical_device()
+  {
+    // listing graphics cards is somewhat like listing extensions
+    uint32_t device_count = 0;
+    vkEnumeratePhysicalDevices(instance, &device_count, nullptr);
+    // if we can't find any devices with vulkan support then we stop here
+    if (device_count == 0) {
+      throw std::runtime_error("failed to find GPUs with Vulkan support!");
+    }
+    // otherwise we can create an array to hold all vkdevice handles
+    std::vector<VkPhysicalDevice> devices(device_count);
+    vkEnumeratePhysicalDevices(instance, &device_count, devices.data());
+    for (const auto& device : devices) {
+      if (is_device_suitable(device)) {
+          physical_device = device;
+          break;
+        }
+    }
+
+    if (physical_device == VK_NULL_HANDLE) {
+      throw std::runtime_error("Failed to find a suitable GPU!");
+    }
+  }
+
+  // must check to make sure that the device we have is capable of the tasks
+  // we plan to use it for in Vulkan
+  // 
+  // This function is obviously extensible, as any new functional requirement
+  // can be quickly checked for here
+  // 
+  // You can either pick the first device that meets the requirements by
+  // returning a long conditional (return featureX && featureY && capabilityb)
+  // or you can create an orderd list and return the device with the highest
+  // score, create a separate function that looks at the devices capabilities
+  // by mutating and returning a local score variable.
+  // 
+  bool is_device_suitable(VkPhysicalDevice device) {
+    /*
+    // We can obtain basic device properties like name, type, etc. by querying
+    // for them using the following function
+    VkPhysicalDeviceProperties device_properties;
+    vkGetPhysicalDeviceProperties(device, &device_properties);
+    // support for optional features can be obtained by using the following
+    // function
+    VkPhysicalDeviceFeatures device_features;
+    vkGetPhysicalDeviceFeatures(device, &device_features);
+    return true;
+    */
+    QueueFamilyIndices indices = find_queue_families(device);
+
+    return indices.is_complete();
+  }
+
+  // We must check if we have access to certain queues and queue families
+  //
+  // We need queues because almost every operation in Vulkan requires
+  // commands to be submitted throuhg a queue.
+  //
+  // Queues from differnt queue families only allow certain subsets of
+  // operations to be loaded in
+  //
+  // To accomplish this task we will make use of a new struct and find function
+  // we implement here
+  struct QueueFamilyIndices {
+    // -1 denotes "not found"
+    int graphics_family = -1;
+
+    bool is_complete() {
+      return graphics_family >= 0;
+    }
+  };
+
+  QueueFamilyIndices find_queue_families(VkPhysicalDevice device) {
+    QueueFamilyIndices indices;
+
+    uint32_t queue_family_count = 0;
+    vkGetPhysicalDeviceQueueFamilyProperties(device, &queue_family_count, nullptr);
+
+    std::vector<VkQueueFamilyProperties> queue_families(queue_family_count);
+    vkGetPhysicalDeviceQueueFamilyProperties(device, &queue_family_count, queue_families.data());
+
+    // the VkQueueFamilyProperties struct contains information such as the type
+    // of operations supported by the family and how many queues can be created
+    // based off that family
+    //
+    // We need to find a queue family with at least the support of
+    // VK_QUEUE_GRAPHICS_BIT
+    int i = 0;
+    for (const auto& queue_family : queue_families) {
+      if (queue_family.queueCount > 0 && queue_family.queueFlags & VK_QUEUE_GRAPHICS_BIT) {
+        indices.graphics_family = i;
+      }
+      if (indices.is_complete()) {
+        break;
+      }
+    
+      ++i;
+    }
+
+    return indices;
   }
 };
 
