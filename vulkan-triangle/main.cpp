@@ -62,6 +62,12 @@ private:
   VkInstance instance;
   VkDebugReportCallbackEXT callback;
   VkPhysicalDevice physical_device = VK_NULL_HANDLE;
+  // stores logical device handle
+  VkDevice device;
+  // class member to store a handle to the graphics queue
+  // device queues are implicitly cleaned up when the device is destroyed
+  // therefore we don't need to worry about cleaning this up in cleanup()
+  VkQueue graphics_queue;
 
 
   void init_window()
@@ -219,6 +225,7 @@ private:
     create_instance();
     setup_debug_callback();
     pick_physical_device();
+    create_logical_device();
   }
 
   void main_loop()
@@ -230,6 +237,7 @@ private:
 
   void cleanup()
   {
+    vkDestroyDevice(device, nullptr);
     if (enable_validation_layers) {
       destroy_debug_report_callback_ext(instance, callback, nullptr);
     }
@@ -346,6 +354,68 @@ private:
 
     return indices;
   }
+
+  // We must specify many details to properly create a logical device
+  //
+  // (For now?) We only really need one queue in a family, that's because
+  // we can create all command buffers on multiple threads and then combine
+  // them all at once on the main thread via a low overhead function call
+  //
+  void create_logical_device() {
+    // One such detail is how many queues we want inside of a queue family
+    // we will use a struct that we create to accomodate this necessity
+    QueueFamilyIndices indices = find_queue_families(physical_device);
+
+    VkDeviceQueueCreateInfo queue_create_info = {};
+    queue_create_info.sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
+    queue_create_info.queueFamilyIndex = indices.graphics_family;
+    queue_create_info.queueCount = 1;
+    // Vulkan requires that you assign priorities to the queues so that you can
+    // influence the scheduling of the command buffer execution. To do this you
+    // must assign a floating point number between 0.0 and 1.0
+    float queue_priority = 1.0;
+    queue_create_info.pQueuePriorities = &queue_priority;
+
+    // We must also specify which features we will be using. These features were
+    // queried with vkGetPhysicalDeviceFeatures. Instantiating a 
+    // VkPhysicalDeviceFeatures object defaults all features to VK_FALSE;
+    VkPhysicalDeviceFeatures device_features = {};
+
+    VkDeviceCreateInfo create_info = {};
+    create_info.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
+    // First we add pointers to the queue creation info and the device features
+    // we obtained above
+    create_info.pQueueCreateInfos = &queue_create_info;
+    create_info.queueCreateInfoCount = 1;
+    create_info.pEnabledFeatures = &device_features;
+    // We will enable the same validation layers for devices as we did for the
+    // instance
+    create_info.enabledExtensionCount = 0;
+    if (enable_validation_layers) {
+      create_info.enabledLayerCount = static_cast<uint32_t>(validation_layers.size());
+      create_info.ppEnabledLayerNames = validation_layers.data();
+    } else {
+      create_info.enabledLayerCount = 0;
+    }
+
+    // Instantiate the logical device with call from following function
+    // The parameters to vkCreateDevice() are:
+    //   -physical device to interface to
+    //   -the queue and usage info we just set up
+    //   -optional allocation callbacks pointer
+    //   -pointer to variable to store the logical device in
+    if (vkCreateDevice(physical_device, &create_info, nullptr, &device) != VK_SUCCESS) {
+      throw std::runtime_error("Failed to create logical device!");
+    }
+    // This function retrieves queue handles for each queue family
+    // It's parameters are:
+    //   -logical device
+    //   -queue family
+    //   -queue index
+    //   -pointer to variable to store the handle in
+    vkGetDeviceQueue(device, indices.graphics_family, 0, &graphics_queue);
+  }
+
 };
 
 int main()
