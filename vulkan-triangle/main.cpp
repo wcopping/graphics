@@ -84,6 +84,9 @@ private:
   // device queues are implicitly cleaned up when the device is destroyed
   // therefore we don't need to worry about cleaning this up in cleanup()
   VkQueue graphics_queue;
+  const std::vector<const char*> device_extensions = {
+    VK_KHR_SWAPCHAIN_EXTENSION_NAME
+  };
 
 
   void init_vulkan()
@@ -322,7 +325,16 @@ private:
     */
     QueueFamilyIndices indices = find_queue_families(device);
 
-    return indices.is_complete();
+    bool extensions_supported = check_device_extension_support(device);
+
+    bool swap_chain_adequate = false;
+    if (extensions_supported) {
+      SwapChainSupportDetails swap_chain_support = query_swap_chain_support(device);
+      swap_chain_adequate = !swap_chain_support.formats.empty() &&
+        !swap_chain_support.present_modes.empty();
+    }
+
+    return indices.is_complete() && extensions_supported && swap_chain_adequate;
   }
 
   // We must check if we have access to certain queues and queue families
@@ -333,8 +345,7 @@ private:
   // Queues from differnt queue families only allow certain subsets of
   // operations to be loaded in
   //
-  // To accomplish this task we will make use of a new struct and find function
-  // we implement here
+  // To accomplish this task we will make use of a new struct
   struct QueueFamilyIndices {
     // -1 denotes "not found"
     // We must set both the families required for presentation and drawing
@@ -346,6 +357,14 @@ private:
     bool is_complete() {
       return graphics_family >= 0 && present_family >= 0;
     }
+  };
+
+  // Useful for passing around details of swap chain support
+  // We will use in function query_swap_chain_support
+  struct SwapChainSupportDetails {
+    VkSurfaceCapabilitiesKHR capabilities;
+    std::vector<VkSurfaceFormatKHR> formats;
+    std::vector<VkPresentModeKHR> present_modes;
   };
 
   QueueFamilyIndices find_queue_families(VkPhysicalDevice device) {
@@ -429,7 +448,8 @@ private:
 
     // We will enable the same validation layers for devices as we did for the
     // instance
-    create_info.enabledExtensionCount = 0;
+    create_info.enabledExtensionCount = static_cast<uint32_t>(device_extensions.size());
+    create_info.ppEnabledExtensionNames = device_extensions.data();
 
     // We must also specify which features we will be using. These features were
     // queried with vkGetPhysicalDeviceFeatures. Instantiating a 
@@ -486,6 +506,133 @@ private:
     if (glfwCreateWindowSurface(instance, window, nullptr, &surface) != VK_SUCCESS) {
       throw std::runtime_error("Failed to create window surface!");
       // This must be destroyed through vkDestroySurfaceKHR(...) in cleanup()
+    }
+  }
+
+  // We create a vector of available extensions and a set of required extensions
+  // we then iterate through each of the available extensions and use
+  // set::erase to remove those extensions from the set of required extensions
+  // At the end of this function we return true if all of the required exts were
+  // also in the list of available functions
+  bool check_device_extension_support(VkPhysicalDevice device) {
+    uint32_t extension_count;
+    vkEnumerateDeviceExtensionProperties(device, nullptr, &extension_count, nullptr);
+
+    std::vector<VkExtensionProperties> available_extensions(extension_count);
+    vkEnumerateDeviceExtensionProperties(device, nullptr, &extension_count,
+        available_extensions.data());
+    std::set<std::string> required_extensions(device_extensions.begin(),
+        device_extensions.end());
+
+    for (const auto& extension : available_extensions) {
+      required_extensions.erase(extension.extensionName);
+    }
+
+    return required_extensions.empty();
+  }
+
+  SwapChainSupportDetails query_swap_chain_support(VkPhysicalDevice device) {
+    SwapChainSupportDetails details;
+
+    // Query the basic surface capabilities
+    vkGetPhysicalDeviceSurfaceCapabilitiesKHR(device, surface, &details.capabilities);
+
+    // Query supported surface formats
+    uint32_t format_count;
+    vkGetPhysicalDeviceSurfaceFormatsKHR(device, surface, &format_count, nullptr);
+
+    if (format_count != 0) {
+      details.formats.resize(format_count);
+      vkGetPhysicalDeviceSurfaceFormatsKHR(device, surface, &format_count,
+          details.formats.data());
+    }
+
+    // Query the supported presentation modes
+    uint32_t present_mode_count;
+    vkGetPhysicalDeviceSurfacePresentModesKHR(device, surface,
+        &present_mode_count, nullptr);
+    if (present_mode_count != 0) {
+      details.present_modes.resize(present_mode_count);
+      vkGetPhysicalDeviceSurfacePresentModesKHR(device, surface,
+          &present_mode_count, details.present_modes.data());
+    }
+
+    return details;
+  }
+
+  // Each VkSurfaceFormatKHR contains a format and colorSpace member
+  // format specifies the color channels and types
+  // colorSpace specifies if the SRGB color space is supported or not
+  // (by changing the VK_COLOR_SPACE_SRGB_NONLINEAR_KHR_FLAG)
+  //
+  // A format of VK_FORMAT_UNDEFINED means that the surface has no preference
+  // to formats and allows us to use RGB
+  //
+  // We want to have SRGB support in the color space and use an RGB format
+  // for color accuracy and easier manageability respectively
+  VkSurfaceFormatKHR choose_swap_surface_format(const
+      std::vector<VkSurfaceFormatKHR>& available_formats) {
+    if (available_formats.size() == 1 && available_formats[0].format == 
+        VK_FORMAT_UNDEFINED) {
+      return {VK_FORMAT_B8G8R8A8_UNORM, VK_COLOR_SPACE_SRGB_NONLINEAR_KHR };
+    }
+
+    // If the format is defined (the surface has a preference), then we must
+    // check if our preferred setup is possible
+    for (auto const& available_format : available_formats) {
+      if (available_format.format == VK_FORMAT_B8G8R8A8_UNORM &&
+          available_format.colorSpace == VK_COLOR_SPACE_SRGB_NONLINEAR_KHR) {
+        return available_format;
+      }
+    }
+
+    // If our preferred way is not possible then just return the first format
+    // that's available
+    return available_formats[0];
+  }
+
+  VkPresentModeKHR choose_swap_present_mode(const
+      std::vector<VkPresentModeKHR> available_present_modes) {
+    VkPresentModeKHR best_mode = VK_PRESENT_MODE_FIFO_KHR;
+    for (const auto& available_present_mode : available_present_modes) {
+      if (available_present_mode == VK_PRESENT_MODE_MAILBOX_KHR) {
+        return available_present_mode;
+      }  else if (available_present_mode == VK_PRESENT_MODE_IMMEDIATE_KHR) {
+      best_mode = available_present_mode;
+      }
+    }
+    return best_mode;
+  }
+
+  // swap extent is resolution of swap chain images
+  // it is almost always equal to resolution of window we are drawing to
+  //
+  // the range of possible resolutions is defined in the
+  // VkSurfaceCapabilitiesKHR structure
+  //
+  // we must match the resolution of the window by setting width and height of
+  // in the current_extent member
+  //
+  // setting current_extent to the max value of uint32_t is a special case that
+  // we take advantage of if the window manager allows us to
+  // doing so allows us to pick the best resolution possible in min/max range of
+  // the imageExtent bounds
+  VkExtent2D choose_swap_extent(const VkSurfaceCapabilitiesKHR& capabilities) {
+    if (capabilities.currentExtent.width != std::numeric_limits<uint32_t>::max()) {
+      return capabilities.currentExtent;
+    } else {
+      VkExtent2D actual_extent = {WIDTH, HEIGHT};
+      
+      actual_extent.width =
+        std::max(capabilities.minImageExtent.width,
+        std::min(capabilities.maxImageExtent.width,
+        actual_extent.width));
+      actual_extent.height =
+        std::max(capabilities.minImageExtent.height,
+        std::min(capabilities.maxImageExtent.height,
+        actual_extent.height));
+
+      return actual_extent;
     }
   }
 
