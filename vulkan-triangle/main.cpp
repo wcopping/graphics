@@ -87,6 +87,15 @@ private:
   const std::vector<const char*> device_extensions = {
     VK_KHR_SWAPCHAIN_EXTENSION_NAME
   };
+  VkSwapchainKHR swap_chain;
+
+  // stores handles of images
+  //
+  // we don't need to explicitly destroy this because they are destroyed when we
+  // get rid of the swap chain itself in cleanup()
+  std::vector<VkImage> swap_chain_images;
+  VkFormat swap_chain_image_format;
+  VkExtent2D swap_chain_extent;
 
 
   void init_vulkan()
@@ -96,6 +105,7 @@ private:
     create_surface();
     pick_physical_device();
     create_logical_device();
+    create_swap_chain();
   }
 
   void main_loop()
@@ -258,6 +268,7 @@ private:
 
   void cleanup()
   {
+    vkDestroySwapchainKHR(device, swap_chain, nullptr);
     vkDestroyDevice(device, nullptr);
     if (enable_validation_layers) {
       destroy_debug_report_callback_ext(instance, callback, nullptr);
@@ -636,6 +647,85 @@ private:
     }
   }
 
+  // we will call this in init_vulkan after creating the logical device
+  // we are filling in all the details of the swap chain here by using the
+  // functions and structs we made previously
+  void create_swap_chain() {
+    SwapChainSupportDetails swap_chain_support =
+      query_swap_chain_support(physical_device);
+
+
+    VkSurfaceFormatKHR surface_format = 
+      choose_swap_surface_format(swap_chain_support.formats);
+    VkPresentModeKHR present_mode = 
+      choose_swap_present_mode(swap_chain_support.present_modes);
+    VkExtent2D extent = choose_swap_extent(swap_chain_support.capabilities);
+
+    uint32_t image_count =
+      swap_chain_support.capabilities.minImageCount + 1;
+    if (swap_chain_support.capabilities.maxImageCount > 0 &&
+        image_count > swap_chain_support.capabilities.maxImageCount) {
+      image_count = swap_chain_support.capabilities.maxImageCount;
+    }
+
+    VkSwapchainCreateInfoKHR create_info = {};
+    create_info.sType = VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR;
+    create_info.surface = surface;
+    create_info.minImageCount = image_count;
+    create_info.imageFormat = surface_format.format;
+    create_info.imageColorSpace = surface_format.colorSpace;
+    create_info.imageExtent = extent;
+    create_info.imageArrayLayers = 1;
+    // we are using the images for color attachment, we are rendering directly
+    // to the swap chain buffers
+    // here we set this up with the imageUsage variable
+    //
+    // If we were interested in post-processing we would need to render the
+    // images to different images first and could do so by changing
+    // imageUsage to VK_IMAGE_USAGE_TRANSFER_DST_BIT
+    create_info.imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
+
+    // we need to be careful if the presentation and drawing queue families are
+    // not the same (which they probably are but it is possible)
+    //
+    // we will specify how to handle swap chainimages that are used across
+    // different queue families
+    QueueFamilyIndices indices = find_queue_families(physical_device);
+    uint32_t queueFamilyIndices[] = { (uint32_t) indices.graphics_family,
+      (uint32_t) indices.present_family };
+    if (indices.graphics_family != indices.present_family) {
+      // VK_SHARING_MODE_CONCURRENT - images can be used across multiple
+      // queue families without explicit transfer of ownership
+      create_info.imageSharingMode      = VK_SHARING_MODE_CONCURRENT;
+      create_info.queueFamilyIndexCount = 2;
+      create_info.pQueueFamilyIndices   = queueFamilyIndices;
+    } else {
+      // VK_SHARING_MODE_EXCLUSIVE - image is owned by one famly at a time and
+      // ownership must be explicitly transferred before using it in another
+      // family
+      create_info.imageSharingMode      = VK_SHARING_MODE_EXCLUSIVE;
+      create_info.queueFamilyIndexCount = 0;
+      create_info.pQueueFamilyIndices   = nullptr;
+    }
+    // specifying capabilities.currentTransform shows that you don't want any
+    // transform applied
+    create_info.preTransform = swap_chain_support.capabilities.currentTransform;
+    create_info.compositeAlpha = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR;
+    create_info.presentMode = present_mode;
+    create_info.clipped = VK_TRUE;
+    create_info.oldSwapchain = VK_NULL_HANDLE;
+
+    if (vkCreateSwapchainKHR(device, &create_info, nullptr, &swap_chain) != VK_SUCCESS) {
+      throw std::runtime_error("Failed to create swap chain!");
+    }
+
+    vkGetSwapchainImagesKHR(device, swap_chain, &image_count, nullptr);
+    swap_chain_images.resize(image_count);
+    vkGetSwapchainImagesKHR(device, swap_chain, &image_count, swap_chain_images.data());
+    swap_chain_image_format = surface_format.format;
+    swap_chain_extent = extent;
+  }
+
 };
 
 int main()
@@ -651,3 +741,4 @@ int main()
   
   return EXIT_SUCCESS;
 }
+
