@@ -10,6 +10,7 @@
 #include <algorithm>
 #include <cstring>
 #include <set>
+#include <fstream>
 
 
 const int WIDTH  = 800;
@@ -47,8 +48,7 @@ void destroy_debug_report_callback_ext(VkInstance instance,
     }
 }
 
-class HelloTriangleApplication
-{
+class HelloTriangleApplication {
 public:
   void run()
   {
@@ -98,8 +98,7 @@ private:
   std::vector<VkImageView> swap_chain_image_views;
 
 
-  void init_vulkan()
-  {
+  void init_vulkan() {
     create_instance();
     setup_debug_callback();
     create_surface();
@@ -107,17 +106,16 @@ private:
     create_logical_device();
     create_swap_chain();
     create_image_views();
+    create_graphics_pipeline();
   }
 
-  void main_loop()
-  {
+  void main_loop() {
     while (!glfwWindowShouldClose(window)) {
       glfwPollEvents();
     }
   }
 
-  void init_window()
-  {
+  void init_window() {
     glfwInit();
 
     glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
@@ -139,8 +137,7 @@ private:
     return VK_FALSE;
   }
   
-  std::vector<const char*> get_required_extensions()
-  {
+  std::vector<const char*> get_required_extensions() {
     uint32_t glfw_extension_count = 0;
     const char** glfw_extensions;
     glfw_extensions = glfwGetRequiredInstanceExtensions(&glfw_extension_count);
@@ -154,8 +151,7 @@ private:
     return extensions;
   }
 
-  bool check_validation_layer_support()
-  {
+  bool check_validation_layer_support() {
     uint32_t layer_count;
     vkEnumerateInstanceLayerProperties(&layer_count, nullptr);
 
@@ -213,8 +209,7 @@ private:
 
 
 
-  void create_instance()
-  {
+  void create_instance() {
     if (enable_validation_layers && !check_validation_layer_support()) {
       throw std::runtime_error("Validation layers requested, but not available!");
     }
@@ -251,8 +246,7 @@ private:
 
   }
 
-  void setup_debug_callback()
-  {
+  void setup_debug_callback() {
     if (!enable_validation_layers) return;
 
     VkDebugReportCallbackCreateInfoEXT create_info = {};
@@ -267,8 +261,7 @@ private:
 
 
 
-  void cleanup()
-  {
+  void cleanup() {
     for (auto image_view : swap_chain_image_views) {
       vkDestroyImageView(device, image_view, nullptr);
     }
@@ -290,8 +283,7 @@ private:
   // we need to store this device as a VkPhysicalDevice but we do not need to
   // do anything special to destroy it once we are done as that is taken care of
   // already, implicitly, when we destroy the VkInstance
-  void pick_physical_device()
-  {
+  void pick_physical_device() {
     // listing graphics cards is somewhat like listing extensions
     uint32_t device_count = 0;
     vkEnumeratePhysicalDevices(instance, &device_count, nullptr);
@@ -767,6 +759,79 @@ private:
       // created them
     }
   }
+
+  void create_graphics_pipeline() {
+    auto vert_shader_code = read_file("shaders/vert.spv");
+    auto frag_shader_code = read_file("shaders/frag.spv");
+
+    VkShaderModule vert_shader_module;
+    VkShaderModule frag_shader_module;
+
+    vert_shader_module = create_shader_module(vert_shader_code);
+    frag_shader_module = create_shader_module(frag_shader_code);
+
+    VkPipelineShaderStageCreateInfo vert_shader_stage_info = {};
+    vert_shader_stage_info.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+    vert_shader_stage_info.stage = VK_SHADER_STAGE_VERTEX_BIT;
+    vert_shader_stage_info.module = vert_shader_module;
+    vert_shader_stage_info.pName = "main";
+
+    VkPipelineShaderStageCreateInfo frag_shader_stage_info = {};
+    frag_shader_stage_info.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+    frag_shader_stage_info.stage = VK_SHADER_STAGE_FRAGMENT_BIT;
+    frag_shader_stage_info.module = frag_shader_module;
+    frag_shader_stage_info.pName = "main";
+
+    VkPipelineShaderStageCreateInfo shader_stages[] =
+    { vert_shader_stage_info, frag_shader_stage_info };
+
+    vkDestroyShaderModule(device, vert_shader_module, nullptr);
+    vkDestroyShaderModule(device, frag_shader_module, nullptr);
+  }
+
+  static std::vector<char> read_file(const std::string& filename) {
+    // open file with two flags:
+    // ate    - start reading at end of file
+    // binary - read the file as a binary file
+    //
+    // because we start at the end of the file, we know how large the file is
+    // and can therefore provide a buffer for it
+    std::ifstream file(filename, std::ios::ate | std::ios::binary);
+    if (!file.is_open()) {
+      throw std::runtime_error("Failed to open file!");
+    }
+
+    size_t file_size = (size_t) file.tellg();
+    std::vector<char> buffer(file_size);
+
+    file.seekg(0);
+    file.read(buffer.data(), file_size);
+
+    file.close();
+
+    return buffer;
+  }
+
+  // we have to take our shader code (compiled by the glslangValidator) and
+  // wrap it in a VkShaderModule object before we pass it to the pipeline
+  VkShaderModule create_shader_module(const std::vector<char>& code) {
+    VkShaderModuleCreateInfo create_info = {};
+    create_info.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
+    create_info.codeSize = code.size();
+    // we have to cast this because the size of the bytecode is specified in
+    // bytes but pCode is a pointer to a uint32_t rather than a char pointer
+    create_info.pCode = reinterpret_cast<const uint32_t*>(code.data());
+
+    VkShaderModule shader_module;
+    if (vkCreateShaderModule(device, &create_info, nullptr, &shader_module) != VK_SUCCESS) {
+      throw std::runtime_error("Failed to create shader module!");
+    }
+    // these are only required in the pipeline creation process and thus do not
+    // need to be declared as global variables. Instead we create them in the
+    // create_graphics_pipeline function
+    return shader_module;
+  }
+
 };
 
 int main()
