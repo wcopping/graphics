@@ -96,6 +96,7 @@ private:
   VkFormat swap_chain_image_format;
   VkExtent2D swap_chain_extent;
   std::vector<VkImageView> swap_chain_image_views;
+  VkPipelineLayout pipeline_layout;
 
 
   void init_vulkan() {
@@ -262,6 +263,7 @@ private:
 
 
   void cleanup() {
+    vkDestroyPipelineLayout(device, pipeline_layout, nullptr);
     for (auto image_view : swap_chain_image_views) {
       vkDestroyImageView(device, image_view, nullptr);
     }
@@ -785,6 +787,119 @@ private:
     VkPipelineShaderStageCreateInfo shader_stages[] =
     { vert_shader_stage_info, frag_shader_stage_info };
 
+    VkPipelineVertexInputStateCreateInfo vertex_input_info = {};
+    vertex_input_info.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
+    vertex_input_info.vertexBindingDescriptionCount = 0;
+    vertex_input_info.pVertexBindingDescriptions = nullptr;
+    vertex_input_info.vertexAttributeDescriptionCount = 0;
+    vertex_input_info.pVertexAttributeDescriptions = nullptr; 
+
+    VkPipelineInputAssemblyStateCreateInfo input_assembly = {};
+    input_assembly.sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO;
+    // topology is how we read and draw our vertices (think GL_TRIANGLE,
+    // GL_TRIANGLE_STRIP, etc)
+    input_assembly.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
+    // if this is enabled then we can break up triangles and lines in STRIP mode
+    // by inputing special index values 0xFFFF and 0xFFFFFFFF
+    input_assembly.primitiveRestartEnable = VK_FALSE;
+
+    // a viewport describes the area of the framebuffer that we will render to
+    VkViewport viewport = {};
+    viewport.x = 0.0f;
+    viewport.y = 0.0f;
+    viewport.width = (float) swap_chain_extent.width;
+    viewport.height = (float) swap_chain_extent.height;
+    viewport.minDepth = 0.0f;
+    viewport.maxDepth = 1.0f;
+
+    // scissors are used to tell which portion of the image from the swap chain
+    // to fill the framebuffer with
+    // here we will be using the entire image
+    VkRect2D scissor = {};
+    scissor.offset = {0, 0};
+    scissor.extent = swap_chain_extent;
+
+    // we can use more than one viewport and scissor if our gpu allows it
+    // we must check for that availability in create_logical_device though
+    VkPipelineViewportStateCreateInfo viewport_state = {};
+    viewport_state.sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO;
+    viewport_state.viewportCount = 1;
+    viewport_state.pViewports = &viewport;
+    viewport_state.scissorCount = 1;
+    viewport_state.pScissors = &scissor;
+    
+    VkPipelineRasterizationStateCreateInfo rasterizer = {};
+    rasterizer.sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO;
+    // setting this to true means fragments outside of near and far will be
+    // clamped to that plane instead of discarding them
+    // this requires enabling a gpu feature
+    rasterizer.depthClampEnable = VK_FALSE;
+    // using any mode except for FILL requires enabling a gpu feature
+    rasterizer.polygonMode = VK_POLYGON_MODE_FILL;
+    // any thicker than 1.0f will require enable gpu feature wideLines
+    // max width depends on hardware
+    rasterizer.lineWidth = 1.0f;
+    rasterizer.cullMode = VK_CULL_MODE_BACK_BIT;
+    rasterizer.frontFace = VK_FRONT_FACE_CLOCKWISE;
+    rasterizer.depthBiasEnable = VK_FALSE;
+    rasterizer.depthBiasConstantFactor = 0.0f; 
+    rasterizer.depthBiasClamp = 0.0f; 
+    rasterizer.depthBiasSlopeFactor = 0.0f; 
+
+    
+    // multisampling is a way to perform anti-aliasing
+    /*
+     * we will not be using multisampling in this tutorial
+     * it also requires a gpu feature to be enabled
+    VkPipelineMultisampleStateCreateInfo multisampling = {};
+    multisampling.sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO;
+    multisampling.sampleShadingEnable = VK_FALSE;
+    multisampling.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
+    multisampling.minSampleShading = 1.0f; // Optional
+    multisampling.pSampleMask = nullptr; // Optional
+    multisampling.alphaToCoverageEnable = VK_FALSE; // Optional
+    multisampling.alphaToOneEnable = VK_FALSE; // Optional
+    */
+
+    // depth and stencil testing will not be used for now
+    // VkPipelineDepthStencilStateCreateInfo
+    
+    VkPipelineColorBlendAttachmentState color_blend_attachment = {};
+    color_blend_attachment.colorWriteMask = VK_COLOR_COMPONENT_R_BIT |
+    VK_COLOR_COMPONENT_G_BIT | VK_COLOR_COMPONENT_B_BIT |
+    VK_COLOR_COMPONENT_A_BIT;
+    color_blend_attachment.blendEnable = VK_FALSE;
+    color_blend_attachment.srcColorBlendFactor = VK_BLEND_FACTOR_ONE;
+    color_blend_attachment.dstColorBlendFactor = VK_BLEND_FACTOR_ZERO;
+    color_blend_attachment.colorBlendOp = VK_BLEND_OP_ADD;
+    color_blend_attachment.srcAlphaBlendFactor = VK_BLEND_FACTOR_ONE;
+    color_blend_attachment.dstAlphaBlendFactor = VK_BLEND_FACTOR_ZERO;
+    color_blend_attachment.alphaBlendOp = VK_BLEND_OP_ADD; 
+
+    VkPipelineColorBlendStateCreateInfo color_blending = {};
+    color_blending.sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO;
+    color_blending.logicOpEnable = VK_FALSE;
+    color_blending.logicOp = VK_LOGIC_OP_COPY; // Optional
+    color_blending.attachmentCount = 1;
+    color_blending.pAttachments = &color_blend_attachment;
+    color_blending.blendConstants[0] = 0.0f; // Optional
+    color_blending.blendConstants[1] = 0.0f; // Optional
+    color_blending.blendConstants[2] = 0.0f; // Optional
+    color_blending.blendConstants[3] = 0.0f; // Optional
+
+    // this struct is used to specify uniform variables used in the shaders
+    // this will be referenced throughout this program's lifetime and so should
+    // be destroyed in cleanup
+    VkPipelineLayoutCreateInfo pipeline_layout_info = {};
+    pipeline_layout_info.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+    pipeline_layout_info.setLayoutCount = 0; // Optional
+    pipeline_layout_info.pSetLayouts = nullptr; // Optional
+    pipeline_layout_info.pushConstantRangeCount = 0; // Optional
+    pipeline_layout_info.pPushConstantRanges = nullptr; // Optional
+    if (vkCreatePipelineLayout(device, &pipeline_layout_info, nullptr, &pipeline_layout) != VK_SUCCESS) {
+      throw std::runtime_error("failed to create pipeline layout!");
+    }
+    
     vkDestroyShaderModule(device, vert_shader_module, nullptr);
     vkDestroyShaderModule(device, frag_shader_module, nullptr);
   }
