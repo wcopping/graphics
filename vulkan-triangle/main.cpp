@@ -630,9 +630,7 @@ private:
     VkPipelineVertexInputStateCreateInfo vertex_input_info = {};
     vertex_input_info.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
     vertex_input_info.vertexBindingDescriptionCount   = 0;
-    vertex_input_info.pVertexBindingDescriptions      = nullptr;
     vertex_input_info.vertexAttributeDescriptionCount = 0;
-    vertex_input_info.pVertexAttributeDescriptions    = nullptr; 
 
     VkPipelineInputAssemblyStateCreateInfo input_assembly = {};
     input_assembly.sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO;
@@ -683,7 +681,6 @@ private:
     rasterizer.cullMode = VK_CULL_MODE_BACK_BIT;
     rasterizer.frontFace = VK_FRONT_FACE_CLOCKWISE;
     rasterizer.depthBiasEnable = VK_FALSE;
-    rasterizer.depthBiasConstantFactor = 0.0f; 
 
     // multisampling is a way to perform anti-aliasing
     /*
@@ -765,7 +762,7 @@ private:
   void create_framebuffers() {
     swap_chain_framebuffers.resize(swap_chain_image_views.size());
 
-      for (size_t i; i < swap_chain_image_views.size(); i++) {
+    for (size_t i = 0; i < swap_chain_image_views.size(); i++) {
       VkImageView attachments[] = {swap_chain_image_views[i]};
 
       VkFramebufferCreateInfo framebuffer_info = {};
@@ -794,7 +791,7 @@ private:
     pool_info.queueFamilyIndex = queue_family_indices.graphics_family;
 
     if (vkCreateCommandPool(device, &pool_info, nullptr, &command_pool) != VK_SUCCESS) {
-      std::runtime_error("Failed to create command pool!");
+      throw std::runtime_error("Failed to create command pool!");
     }
   }
 
@@ -803,11 +800,13 @@ private:
   // ----
   void create_command_buffers() {
     command_buffers.resize(swap_chain_framebuffers.size());
+
     VkCommandBufferAllocateInfo alloc_info = {};
     alloc_info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
     alloc_info.commandPool = command_pool;
     alloc_info.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
     alloc_info.commandBufferCount = (uint32_t) command_buffers.size();
+
     if (vkAllocateCommandBuffers(device, &alloc_info, command_buffers.data()) != VK_SUCCESS) {
       throw std::runtime_error("failed to allocate command buffers!");
     }
@@ -1197,7 +1196,7 @@ private:
         break;
       }
     
-      ++i;
+      i++;
     }
 
     return indices;
