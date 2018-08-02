@@ -1,3 +1,53 @@
+// NOTE ON STATIC FUNCTION MEMBERS AND CALLBACK FUNCTIONS
+// To help cement these in a bit more...
+//
+//
+// -----------------------
+// STATIC FUNCTION MEMBERS
+// -----------------------
+// A static class member is one in which there is only one copy of for all
+// instances of a given class. If you have a Box class with a static int
+// object_count member variable, and you instantiate a few Box objects, each
+// object will have the single same object_count variable.
+//
+// FOR C
+// static functions are restricted to use within the file they are declared
+// this allows for the same name of a function to be used across multiple files
+// within a single project
+//
+// FOR C++
+// A static function can be called on the class itself without an instance of
+// the class being available
+// they are global members to a class, they are 'class members', they are not
+// merely 'instance members'
+// they can only operate on the static data members of a class, whereas
+// non-static functions can operate on all data members, static or not, in a
+// class
+//
+//
+// ------------------
+// CALLBACK FUNCTIONS
+// ------------------
+// As for callback functions, these have multiple purposes
+// (https://stackoverflow.com/questions/2298242/callback-functions-in-c)
+// 1. They allow for generic code
+// -> you can create a function that accepts a function pointer, and allows you
+//    to customize calls to this function, an example being the for_each
+//    function in <algorithm>
+// 2. You can use them as a notificaiton system of certain events to callers
+// -> whether it be involved in logic handling or part of a notification
+//    system
+// 3. It allows for dynamic behavior during runtime
+// -> you can allow a player to change keybindings more easily because that
+//    flexibility is written into the callback functions for player action.
+//
+// in C++11 you have a few different types of callables
+//   -function pointers
+//   -std::function objects
+//   -lambda expressions
+//   -bind expressions
+//   -function objects (classes with overloaded function call operator operator())
+
 
 #define GLFW_INCLUDE_VULKAN
 #include <GLFW/glfw3.h>
@@ -44,6 +94,7 @@ VkResult create_debug_report_callback_ext(
     }
 }
 
+
 void destroy_debug_report_callback_ext(VkInstance instance,
     VkDebugReportCallbackEXT callback,
     const VkAllocationCallbacks* p_allocator) {
@@ -53,11 +104,13 @@ void destroy_debug_report_callback_ext(VkInstance instance,
     }
 }
 
+
 struct SwapChainSupportDetails {
   VkSurfaceCapabilitiesKHR capabilities;
   std::vector<VkSurfaceFormatKHR> formats;
   std::vector<VkPresentModeKHR> present_modes;
 };
+
 
 struct QueueFamilyIndices {
   int graphics_family = -1;
@@ -68,6 +121,7 @@ struct QueueFamilyIndices {
   }
 };
 
+
 class HelloTriangleApplication {
 public:
   void run()
@@ -77,6 +131,7 @@ public:
     main_loop();
     cleanup();
   }
+
 
 private:
   GLFWwindow* window;
@@ -108,17 +163,27 @@ private:
   std::vector<VkSemaphore> render_finished_semaphores;
   std::vector<VkFence> in_flight_fences;
   size_t current_frame = 0;
+  
+  bool framebuffer_resized = false;
 
 
   void init_window() {
     glfwInit();
 
     glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
-    glfwWindowHint(GLFW_RESIZABLE, GLFW_FALSE);
 
     window = glfwCreateWindow(WIDTH, HEIGHT, "vulkan", nullptr, nullptr);
+    glfwSetWindowUserPointer(window, this);
+    glfwSetFramebufferSizeCallback(window, framebuffer_resize_callback);
   }
 
+
+  static void framebuffer_resize_callback(GLFWwindow* window, int width, int height) {
+    auto app = reinterpret_cast<HelloTriangleApplication*>(glfwGetWindowUserPointer(window));
+    app->framebuffer_resized = true;
+  }
+
+  
   void init_vulkan() {
     create_instance();
     setup_debug_callback();
@@ -135,6 +200,7 @@ private:
     create_sync_objects();
   }
 
+
   void main_loop() {
     while (!glfwWindowShouldClose(window)) {
       glfwPollEvents();
@@ -144,7 +210,34 @@ private:
     vkDeviceWaitIdle(device);
   }
 
+
+  // facilitates cleanup of objects that were used in the previous swap chain
+  // must clean all objects  needed to recreate swap chain
+  void cleanup_swap_chain() {
+    for (size_t i = 0; i < swap_chain_framebuffers.size(); i++) {
+      vkDestroyFramebuffer(device, swap_chain_framebuffers[i], nullptr);
+    }
+
+    // we use this instead of destroying all the command buffers because
+    // we just need to fill in the existing pool with new commands buffers
+    vkFreeCommandBuffers(device, command_pool,
+        static_cast<uint32_t>(command_buffers.size()), command_buffers.data());
+
+    vkDestroyPipeline(device, graphics_pipeline, nullptr);
+    vkDestroyPipelineLayout(device, pipeline_layout, nullptr);
+    vkDestroyRenderPass(device, render_pass, nullptr);
+
+    for (size_t i = 0; i < swap_chain_image_views.size(); i++) {
+      vkDestroyImageView(device, swap_chain_image_views[i], nullptr);
+    }
+
+    vkDestroySwapchainKHR(device, swap_chain, nullptr);
+  }
+
+
   void cleanup() {
+    cleanup_swap_chain();
+
     for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
       vkDestroySemaphore(device, render_finished_semaphores[i], nullptr);
       vkDestroySemaphore(device, image_available_semaphores[i], nullptr);
@@ -152,18 +245,6 @@ private:
     }
 
     vkDestroyCommandPool(device, command_pool, nullptr);
-
-    for (auto framebuffer : swap_chain_framebuffers) {
-      vkDestroyFramebuffer(device, framebuffer, nullptr);
-    }
-
-    vkDestroyPipeline(device, graphics_pipeline, nullptr);
-    vkDestroyPipelineLayout(device, pipeline_layout, nullptr);
-    vkDestroyRenderPass(device, render_pass, nullptr);
-
-    for (auto image_view : swap_chain_image_views) {
-      vkDestroyImageView(device, image_view, nullptr);
-    }
 
     vkDestroySwapchainKHR(device, swap_chain, nullptr);
     vkDestroyDevice(device, nullptr);
@@ -179,6 +260,7 @@ private:
 
     glfwTerminate();
   }
+
 
   void create_instance() {
     if (enable_validation_layers && !check_validation_layer_support()) {
@@ -217,6 +299,7 @@ private:
 
   }
 
+
   void setup_debug_callback() {
     if (!enable_validation_layers) return;
 
@@ -230,11 +313,13 @@ private:
     }
   }
 
+
   void create_surface() {
     if (glfwCreateWindowSurface(instance, window, nullptr, &surface) != VK_SUCCESS) {
-      throw std::runtime_error("Failed to create window surface!");
+      throw std::runtime_error("failed to create window surface!");
     }
   }
+
 
   void pick_physical_device() {
     uint32_t device_count = 0;
@@ -254,9 +339,10 @@ private:
     }
 
     if (physical_device == VK_NULL_HANDLE) {
-      throw std::runtime_error("Failed to find a suitable GPU!");
+      throw std::runtime_error("failed to find a suitable GPU!");
     }
   }
+
 
   void create_logical_device() {
     QueueFamilyIndices indices = find_queue_families(physical_device);
@@ -286,7 +372,6 @@ private:
     create_info.enabledExtensionCount   = static_cast<uint32_t>(device_extensions.size());
     create_info.ppEnabledExtensionNames = device_extensions.data();
 
-
     if (enable_validation_layers) {
       create_info.enabledLayerCount   = static_cast<uint32_t>(validation_layers.size());
       create_info.ppEnabledLayerNames = validation_layers.data();
@@ -295,13 +380,14 @@ private:
     }
 
     if (vkCreateDevice(physical_device, &create_info, nullptr, &device) != VK_SUCCESS) {
-      throw std::runtime_error("Failed to create logical device!");
+      throw std::runtime_error("failed to create logical device!");
     }
 
     vkGetDeviceQueue(device, indices.graphics_family, 0, &graphics_queue);
     vkGetDeviceQueue(device, indices.present_family, 0, &present_queue);
 
   }
+
 
   void create_swap_chain() {
     SwapChainSupportDetails swap_chain_support =
@@ -347,7 +433,7 @@ private:
     create_info.oldSwapchain = VK_NULL_HANDLE;
 
     if (vkCreateSwapchainKHR(device, &create_info, nullptr, &swap_chain) != VK_SUCCESS) {
-      throw std::runtime_error("Failed to create swap chain!");
+      throw std::runtime_error("failed to create swap chain!");
     }
 
     vkGetSwapchainImagesKHR(device, swap_chain, &image_count, nullptr);
@@ -358,8 +444,18 @@ private:
     swap_chain_extent       = extent;
   }
 
+
+  // if window is resized then we need to recreate the swap chain to handle it
   void recreate_swap_chain() {
+    int width = 0, height = 0;
+    while (width == 0 || height == 0) {
+      glfwGetFramebufferSize(window, &width, &height);
+      glfwWaitEvents();
+    }
+
     vkDeviceWaitIdle(device);
+
+    cleanup_swap_chain();
 
     create_swap_chain();
     create_image_views();
@@ -368,6 +464,7 @@ private:
     create_framebuffers();
     create_command_buffers();
   }
+
 
   void create_image_views() {
     swap_chain_image_views.resize(swap_chain_images.size());
@@ -389,10 +486,11 @@ private:
       create_info.subresourceRange.layerCount = 1;
 
       if (vkCreateImageView(device, &create_info, nullptr, &swap_chain_image_views[i]) != VK_SUCCESS) {
-        std::runtime_error("Failed to create image views!");
+        std::runtime_error("failed to create image views!");
       }
     }
   }
+
 
   void create_render_pass() {
     VkAttachmentDescription color_attachment = {};
@@ -436,6 +534,7 @@ private:
     }
   }
 
+  
   void create_graphics_pipeline() {
     auto vert_shader_code = read_file("shaders/vert.spv");
     auto frag_shader_code = read_file("shaders/frag.spv");
@@ -550,6 +649,7 @@ private:
     vkDestroyShaderModule(device, frag_shader_module, nullptr);
   }
 
+
   void create_framebuffers() {
     swap_chain_framebuffers.resize(swap_chain_image_views.size());
 
@@ -566,10 +666,11 @@ private:
       framebuffer_info.layers = 1;
 
       if (vkCreateFramebuffer(device, &framebuffer_info, nullptr, &swap_chain_framebuffers[i]) != VK_SUCCESS) {
-        std::runtime_error("Failed to create framebuffer!");
+        std::runtime_error("failed to create framebuffer!");
       }
     }
   }
+
 
   void create_command_pool() {
     QueueFamilyIndices queue_family_indices = find_queue_families(physical_device);
@@ -579,9 +680,10 @@ private:
     pool_info.queueFamilyIndex = queue_family_indices.graphics_family;
 
     if (vkCreateCommandPool(device, &pool_info, nullptr, &command_pool) != VK_SUCCESS) {
-      throw std::runtime_error("Failed to create command pool!");
+      throw std::runtime_error("failed to create command pool!");
     }
   }
+
 
   void create_command_buffers() {
     command_buffers.resize(swap_chain_framebuffers.size());
@@ -625,11 +727,12 @@ private:
       vkCmdEndRenderPass(command_buffers[i]);
 
       if (vkEndCommandBuffer(command_buffers[i]) != VK_SUCCESS) {
-        std::runtime_error("Failed to record command buffer!");
+        std::runtime_error("failed to record command buffer!");
       }
     }
   }
 
+  
   void create_sync_objects() {
     image_available_semaphores.resize(MAX_FRAMES_IN_FLIGHT);
     render_finished_semaphores.resize(MAX_FRAMES_IN_FLIGHT);
@@ -646,18 +749,26 @@ private:
       if (vkCreateSemaphore(device, &semaphore_info, nullptr, &image_available_semaphores[i]) != VK_SUCCESS ||
           vkCreateSemaphore(device, &semaphore_info, nullptr, &render_finished_semaphores[i]) != VK_SUCCESS ||
           vkCreateFence(device, &fence_info, nullptr, &in_flight_fences[i]) != VK_SUCCESS) {
-        throw std::runtime_error("Failed to create synchronization objects for a frame!");
+        throw std::runtime_error("failed to create synchronization objects for a frame!");
       }
     }
   }
+
 
   void draw_frame() {
     vkWaitForFences(device, 1, &in_flight_fences[current_frame], VK_TRUE, std::numeric_limits<uint64_t>::max());
     vkResetFences(device, 1, &in_flight_fences[current_frame]);
 
     uint32_t image_index;
-    vkAcquireNextImageKHR(device, swap_chain, std::numeric_limits<uint64_t>::max(),
+    VkResult result = vkAcquireNextImageKHR(device, swap_chain, std::numeric_limits<uint64_t>::max(),
         image_available_semaphores[current_frame], VK_NULL_HANDLE, &image_index);
+
+    if (result == VK_ERROR_OUT_OF_DATE_KHR) {
+      recreate_swap_chain();
+      return;
+    } else if (result != VK_SUCCESS && result != VK_SUBOPTIMAL_KHR) {
+      throw std::runtime_error("failed to acquire swap chain image!");
+    }
 
     VkSubmitInfo submit_info = {};
     submit_info.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
@@ -675,6 +786,8 @@ private:
     submit_info.signalSemaphoreCount = 1;
     submit_info.pSignalSemaphores = signal_semaphores;
 
+    vkResetFences(device, 1, &in_flight_fences[current_frame]);
+
     if (vkQueueSubmit(graphics_queue, 1, &submit_info, in_flight_fences[current_frame]) != VK_SUCCESS) {
       throw std::runtime_error("failed to submit draw command buffer!");
     }
@@ -691,12 +804,18 @@ private:
     
     present_info.pImageIndices = &image_index;
 
-    vkQueuePresentKHR(present_queue, &present_info);
+    result = vkQueuePresentKHR(present_queue, &present_info);
 
-    vkQueueWaitIdle(present_queue);
+    if (result == VK_ERROR_OUT_OF_DATE_KHR || result == VK_SUBOPTIMAL_KHR || framebuffer_resized) {
+      framebuffer_resized = false;
+      recreate_swap_chain();
+    } else if (result != VK_SUCCESS) {
+      std::runtime_error("failed to present swap chain image!");
+    }
 
     current_frame = (current_frame + 1) % MAX_FRAMES_IN_FLIGHT;
   }
+
 
   VkShaderModule create_shader_module(const std::vector<char>& code) {
     VkShaderModuleCreateInfo create_info = {};
@@ -706,10 +825,11 @@ private:
 
     VkShaderModule shader_module;
     if (vkCreateShaderModule(device, &create_info, nullptr, &shader_module) != VK_SUCCESS) {
-      throw std::runtime_error("Failed to create shader module!");
+      throw std::runtime_error("failed to create shader module!");
     }
     return shader_module;
   }
+
 
   VkSurfaceFormatKHR choose_swap_surface_format(const std::vector<VkSurfaceFormatKHR>& available_formats) {
     if (available_formats.size() == 1 && available_formats[0].format == VK_FORMAT_UNDEFINED) {
@@ -726,6 +846,7 @@ private:
     return available_formats[0];
   }
 
+
   VkPresentModeKHR choose_swap_present_mode(const std::vector<VkPresentModeKHR> available_present_modes) {
     VkPresentModeKHR best_mode = VK_PRESENT_MODE_FIFO_KHR;
     for (const auto& available_present_mode : available_present_modes) {
@@ -738,11 +859,18 @@ private:
     return best_mode;
   }
 
+
   VkExtent2D choose_swap_extent(const VkSurfaceCapabilitiesKHR& capabilities) {
     if (capabilities.currentExtent.width != std::numeric_limits<uint32_t>::max()) {
       return capabilities.currentExtent;
     } else {
-      VkExtent2D actual_extent = {WIDTH, HEIGHT};
+      int width, height;
+      glfwGetFramebufferSize(window, &width, &height);
+
+      VkExtent2D actual_extent = {
+        static_cast<uint32_t>(width),
+        static_cast<uint32_t>(height)
+        };
       
       actual_extent.width =
         std::max(capabilities.minImageExtent.width,
@@ -756,6 +884,7 @@ private:
       return actual_extent;
     }
   }
+
 
   SwapChainSupportDetails query_swap_chain_support(VkPhysicalDevice device) {
     SwapChainSupportDetails details;
@@ -781,6 +910,7 @@ private:
     return details;
   }
 
+
   bool is_device_suitable(VkPhysicalDevice device) {
     QueueFamilyIndices indices = find_queue_families(device);
 
@@ -794,6 +924,7 @@ private:
 
     return indices.is_complete() && extensions_supported && swap_chain_adequate;
   }
+
 
   bool check_device_extension_support(VkPhysicalDevice device) {
     uint32_t extension_count;
@@ -811,6 +942,7 @@ private:
     return required_extensions.empty();
   }
 
+
   QueueFamilyIndices find_queue_families(VkPhysicalDevice device) {
     QueueFamilyIndices indices;
 
@@ -819,7 +951,6 @@ private:
 
     std::vector<VkQueueFamilyProperties> queue_families(queue_family_count);
     vkGetPhysicalDeviceQueueFamilyProperties(device, &queue_family_count, queue_families.data());
-
 
     int i = 0;
     for (const auto& queue_family : queue_families) {
@@ -845,6 +976,7 @@ private:
     return indices;
   }
   
+
   std::vector<const char*> get_required_extensions() {
     uint32_t glfw_extension_count = 0;
     const char** glfw_extensions;
@@ -858,6 +990,7 @@ private:
 
     return extensions;
   }
+
 
   bool check_validation_layer_support() {
     uint32_t layer_count;
@@ -884,10 +1017,11 @@ private:
     return true;
   }
 
+
   static std::vector<char> read_file(const std::string& filename) {
     std::ifstream file(filename, std::ios::ate | std::ios::binary);
     if (!file.is_open()) {
-      throw std::runtime_error("Failed to open file!");
+      throw std::runtime_error("failed to open file!");
     }
 
     size_t file_size = (size_t) file.tellg();
@@ -901,6 +1035,7 @@ private:
     return buffer;
   }
 
+
   static VKAPI_ATTR VkBool32 VKAPI_CALL debug_callback(
       VkDebugReportFlagsEXT flags,
       VkDebugReportObjectTypeEXT obj_type,
@@ -913,8 +1048,8 @@ private:
     std::cerr << "Validation Layer: " << msg << std::endl; 
     return VK_FALSE;
   }
-
 };
+
 
 int main()
 {
