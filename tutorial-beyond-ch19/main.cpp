@@ -209,10 +209,13 @@ private:
   bool framebuffer_resized = false;
 
   std::vector<Vertex> vertices = {
-    {{ 0.0f, -0.5f}, {1.0f, 0.0f, 0.0f}},
+    {{ 0.0f, -0.5f}, {1.0f, 1.0f, 1.0f}},
     {{ 0.5f,  0.5f}, {0.0f, 1.0f, 0.0f}},
     {{-0.5f,  0.5f}, {0.0f, 0.0f, 1.0f}}
   };
+
+  VkBuffer vertex_buffer;
+  VkDeviceMemory vertex_buffer_memory;
 
 
   void init_window() {
@@ -244,6 +247,7 @@ private:
     create_graphics_pipeline();
     create_framebuffers();
     create_command_pool();
+    create_vertex_buffer();
     create_command_buffers();
     create_sync_objects();
   }
@@ -285,6 +289,11 @@ private:
 
   void cleanup() {
     cleanup_swap_chain();
+
+    vkDestroyBuffer(device, vertex_buffer, nullptr);
+    // freeing up the memory used by a buffer after the buffer itself is
+    // destroyed
+    vkFreeMemory(device, vertex_buffer_memory, nullptr);
 
     for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
       vkDestroySemaphore(device, render_finished_semaphores[i], nullptr);
@@ -534,7 +543,7 @@ private:
       create_info.subresourceRange.layerCount = 1;
 
       if (vkCreateImageView(device, &create_info, nullptr, &swap_chain_image_views[i]) != VK_SUCCESS) {
-        std::runtime_error("failed to create image views!");
+        throw std::runtime_error("failed to create image views!");
       }
     }
   }
@@ -721,7 +730,7 @@ private:
       framebuffer_info.layers = 1;
 
       if (vkCreateFramebuffer(device, &framebuffer_info, nullptr, &swap_chain_framebuffers[i]) != VK_SUCCESS) {
-        std::runtime_error("failed to create framebuffer!");
+        throw std::runtime_error("failed to create framebuffer!");
       }
     }
   }
@@ -737,6 +746,79 @@ private:
     if (vkCreateCommandPool(device, &pool_info, nullptr, &command_pool) != VK_SUCCESS) {
       throw std::runtime_error("failed to create command pool!");
     }
+  }
+
+
+  void create_vertex_buffer() {
+    VkBufferCreateInfo buffer_info = {};
+    buffer_info.sType       = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+    buffer_info.size        = sizeof(vertices[0]) * vertices.size();
+    buffer_info.usage       = VK_BUFFER_USAGE_VERTEX_BUFFER_BIT;
+    // buffers can be owned by a specific queue family or be shared between
+    // multiple at the same time
+    buffer_info.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+
+    if (vkCreateBuffer(device, &buffer_info, nullptr, &vertex_buffer) != VK_SUCCESS) {
+      throw std::runtime_error("failed to create vertex buffer!");
+    }
+
+    VkMemoryRequirements mem_requirements;
+    vkGetBufferMemoryRequirements(device, vertex_buffer, &mem_requirements);
+
+    // fill in information necessary for allocating memory for a specific buffer
+    // (in this case a buffer for vertex information)
+    VkMemoryAllocateInfo alloc_info = {};
+    alloc_info.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+    alloc_info.allocationSize = mem_requirements.size;
+    alloc_info.memoryTypeIndex = find_memory_type(mem_requirements.memoryTypeBits,
+        VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+
+    // allocate memory for a buffer
+    if (vkAllocateMemory(device, &alloc_info, nullptr, &vertex_buffer_memory) != VK_SUCCESS) {
+      throw std::runtime_error("failed to allocate vertex buffer memory!");
+    }
+
+    // associate the allocated memory with the buffer
+    // the fourth parameter is the offset within the region of memory
+    // if the fourth parameter is non-zero, then it is required to be divisible
+    // by mem_requirements.alignment
+    vkBindBufferMemory(device, vertex_buffer, vertex_buffer_memory, 0);
+
+    // copy the vertex data to the buffer
+    // map the buffer memory into the CPU accessible memory with vkMapMemory
+    // buffer_info.size is the size of memory is the size of the accessible
+    // region in the memory resource
+    // we may also use VK_WHOLE_SIZE to map all of the memory
+    // 2nd to last parameter is for flags, currently unavailable and must be 0
+    // last parameter specifies output for the pointer to the mapped memory
+    void* data;
+    vkMapMemory(device, vertex_buffer_memory, 0, buffer_info.size, 0, &data);
+    memcpy(data, vertices.data(), (size_t) buffer_info.size);
+    vkUnmapMemory(device, vertex_buffer_memory);
+  }
+
+
+  uint32_t find_memory_type(uint32_t type_filter, VkMemoryPropertyFlags properties) {
+    // query info on available types of memory
+    // has two arrays "memoryTypes" and "memoryHeaps"
+    // memory heaps are resources like dedicated VRAM and swap space in RAM
+    // for when VRAM runs out
+    // memoryTypes array consists of VkMemoryType structs that give us info on
+    // the heap and the properties of each type of memory, e.g. info on whether
+    // we can map/write it from the CPU
+    VkPhysicalDeviceMemoryProperties mem_properties;
+    vkGetPhysicalDeviceMemoryProperties(physical_device, &mem_properties);
+
+    for (uint32_t i = 0; i < mem_properties.memoryTypeCount; i++) {
+      // bitwise operation checking if type_filter corresponding bit is set to 1
+      // return the index of the property which matches the properties requirement
+      // we pass to this function
+      if ((type_filter & (1 << i)) && (mem_properties.memoryTypes[i].propertyFlags & properties) == properties) {
+        return i;
+      }
+    }
+
+    throw std::runtime_error("failed to find suitable memory type!");
   }
 
 
@@ -777,12 +859,24 @@ private:
 
       vkCmdBindPipeline(command_buffers[i], VK_PIPELINE_BIND_POINT_GRAPHICS, graphics_pipeline);
 
-      vkCmdDraw(command_buffers[i], 3, 1, 0, 0);
+      VkBuffer vertex_buffers[] = {vertex_buffer};
+      VkDeviceSize offsets[] = {0};
+      // binds vertex buffers to bindings
+      // parameters:
+      //   -command buffer
+      //   -offset
+      //   -number of bindings
+      //   -array of vertex buffers to bind
+      //   -byte offsets to start reading vertex data from
+      vkCmdBindVertexBuffers(command_buffers[i], 0, 1, vertex_buffers, offsets);
+
+      // we pass the number of vertices in the buffer (parameter 2)
+      vkCmdDraw(command_buffers[i], static_cast<uint32_t>(vertices.size()), 1, 0, 0);
 
       vkCmdEndRenderPass(command_buffers[i]);
 
       if (vkEndCommandBuffer(command_buffers[i]) != VK_SUCCESS) {
-        std::runtime_error("failed to record command buffer!");
+        throw std::runtime_error("failed to record command buffer!");
       }
     }
   }
@@ -865,7 +959,7 @@ private:
       framebuffer_resized = false;
       recreate_swap_chain();
     } else if (result != VK_SUCCESS) {
-      std::runtime_error("failed to present swap chain image!");
+      throw std::runtime_error("failed to present swap chain image!");
     }
 
     current_frame = (current_frame + 1) % MAX_FRAMES_IN_FLIGHT;
