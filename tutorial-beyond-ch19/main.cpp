@@ -61,6 +61,8 @@
 #include <cstring>
 #include <set>
 #include <fstream>
+#include <glm/glm.hpp>
+#include <array>
 
 
 const int WIDTH  = 800;
@@ -103,6 +105,46 @@ void destroy_debug_report_callback_ext(VkInstance instance,
         func(instance, callback, p_allocator);
     }
 }
+
+
+struct Vertex {
+  glm::vec2 pos;
+  glm::vec3 color;
+
+  static VkVertexInputBindingDescription get_binding_description() {
+    VkVertexInputBindingDescription binding_description = {};
+    binding_description.binding = 0;
+    binding_description.stride = sizeof(Vertex);
+    binding_description.inputRate = VK_VERTEX_INPUT_RATE_VERTEX;
+
+    return binding_description;
+  }
+
+
+  // an attribute descriptions describes how to extract a vertex attribute from
+  // a chunk of vertex information
+  // we have position and color to worry about and so we accordingly need two
+  // of these structs
+  static std::array<VkVertexInputAttributeDescription, 2> get_attribute_descriptions() {
+    std::array<VkVertexInputAttributeDescription, 2> attribute_descriptions = {};
+    // whcih binding the per-vertex information data comes
+    attribute_descriptions[0].binding  = 0;
+    // references the location directive of the input in the vertex shader
+    attribute_descriptions[0].location = 0;
+    // describes the type of data for the attribute
+    attribute_descriptions[0].format   = VK_FORMAT_R32G32_SFLOAT;
+    // the number of bytes since the start of the per-vertex data to read from
+    // automatically calculated using the offsetof macro
+    attribute_descriptions[0].offset   = offsetof(Vertex, pos);
+
+    attribute_descriptions[1].binding  = 0;
+    attribute_descriptions[1].location = 1;
+    attribute_descriptions[1].format   = VK_FORMAT_R32G32B32_SFLOAT;
+    attribute_descriptions[1].offset   = offsetof(Vertex, color);
+
+    return attribute_descriptions;
+  }
+};
 
 
 struct SwapChainSupportDetails {
@@ -165,6 +207,12 @@ private:
   size_t current_frame = 0;
   
   bool framebuffer_resized = false;
+
+  std::vector<Vertex> vertices = {
+    {{ 0.0f, -0.5f}, {1.0f, 0.0f, 0.0f}},
+    {{ 0.5f,  0.5f}, {0.0f, 1.0f, 0.0f}},
+    {{-0.5f,  0.5f}, {0.0f, 0.0f, 1.0f}}
+  };
 
 
   void init_window() {
@@ -558,8 +606,15 @@ private:
 
     VkPipelineVertexInputStateCreateInfo vertex_input_info = {};
     vertex_input_info.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
-    vertex_input_info.vertexBindingDescriptionCount   = 0;
-    vertex_input_info.vertexAttributeDescriptionCount = 0;
+
+    auto binding_description    = Vertex::get_binding_description();
+    auto attribute_descriptions = Vertex::get_attribute_descriptions();
+
+    vertex_input_info.vertexBindingDescriptionCount   = 1;
+    vertex_input_info.vertexAttributeDescriptionCount =
+      static_cast<uint32_t>(attribute_descriptions.size());
+    vertex_input_info.pVertexBindingDescriptions = &binding_description;
+    vertex_input_info.pVertexAttributeDescriptions = attribute_descriptions.data();
 
     VkPipelineInputAssemblyStateCreateInfo input_assembly = {};
     input_assembly.sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO;
