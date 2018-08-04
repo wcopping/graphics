@@ -47,6 +47,28 @@
 //   -lambda expressions
 //   -bind expressions
 //   -function objects (classes with overloaded function call operator operator())
+//
+//
+// --------------------------------
+// RECOMMENDATION ON BUFFER STORAGE
+// --------------------------------
+// Driver developers recommend storing multiple buffers into a single
+// VkBuffer object and using offsets. So you store both vertex and index
+// information in a single VkBuffer object and use the offset of each to
+// separate the object into usable portions of memory
+// this is for possibly better cache utilization
+//
+//
+// --------------------
+// RESOURCE DESCRIPTORS
+// --------------------
+// allows shaders to access resources like buffers and images
+// we need a transformation matrix
+// we need a model-view-projection matrix for working with 3D graphics
+// to use descriptors we must:
+//   -specify descriptor layout during pipeline creation
+//   -allocate a descriptor set from a descriptor pool
+//   -bind the descriptor set during rendering
 
 
 #define GLFW_INCLUDE_VULKAN
@@ -61,8 +83,11 @@
 #include <cstring>
 #include <set>
 #include <fstream>
-#include <glm/glm.hpp>
 #include <array>
+#define GLM_FORCE_RADIANS
+#include <glm/glm.hpp>
+#include <glm/gtc/matrix_transform.hpp>
+#include <chrono>
 
 
 const int WIDTH  = 800;
@@ -106,6 +131,12 @@ void destroy_debug_report_callback_ext(VkInstance instance,
     }
 }
 
+
+struct UniformBufferObject {
+  glm::mat4 model;
+  glm::mat4 view;
+  glm::mat4 proj;
+};
 
 struct Vertex {
   glm::vec2 pos;
@@ -195,6 +226,7 @@ private:
   std::vector<VkFramebuffer> swap_chain_framebuffers;
 
   VkRenderPass render_pass;
+  VkDescriptorSetLayout descriptor_set_layout;
   VkPipelineLayout pipeline_layout;
   VkPipeline graphics_pipeline;
 
@@ -224,6 +256,9 @@ private:
   VkBuffer index_buffer;
   VkDeviceMemory index_buffer_memory;
 
+  std::vector<VkBuffer> uniform_buffers;
+  std::vector<VkDeviceMemory> uniform_buffers_memory;
+
 
   void init_window() {
     glfwInit();
@@ -251,11 +286,13 @@ private:
     create_swap_chain();
     create_image_views();
     create_render_pass();
+    create_descriptor_set_layout();
     create_graphics_pipeline();
     create_framebuffers();
     create_command_pool();
     create_vertex_buffer();
     create_index_buffer();
+    create_uniform_buffer();
     create_command_buffers();
     create_sync_objects();
   }
@@ -297,6 +334,13 @@ private:
 
   void cleanup() {
     cleanup_swap_chain();
+
+    vkDestroyDescriptorSetLayout(device, descriptor_set_layout, nullptr);
+
+    for (size_t i = 0; i < swap_chain_images.size(); i++) {
+      vkDestroyBuffer(device, uniform_buffers[i], nullptr);
+      vkFreeMemory(device, uniform_buffers_memory[i], nullptr);
+    }
 
     vkDestroyBuffer(device, vertex_buffer, nullptr);
     // freeing up the memory used by a buffer after the buffer itself is
@@ -693,8 +737,8 @@ private:
 
     VkPipelineLayoutCreateInfo pipeline_layout_info = {};
     pipeline_layout_info.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
-    pipeline_layout_info.setLayoutCount = 0; // Optional
-    pipeline_layout_info.pushConstantRangeCount = 0; // Optional
+    pipeline_layout_info.setLayoutCount = 1; 
+    pipeline_layout_info.pSetLayouts = &descriptor_set_layout;
 
     if (vkCreatePipelineLayout(device, &pipeline_layout_info, nullptr, &pipeline_layout) != VK_SUCCESS) {
       throw std::runtime_error("failed to create pipeline layout!");
@@ -793,6 +837,65 @@ private:
     // if the fourth parameter is non-zero, then it is required to be divisible
     // by mem_requirements.alignment
     vkBindBufferMemory(device, buffer, buffer_memory, 0);
+  }
+
+
+  void create_descriptor_set_layout() {
+    VkDescriptorSetLayoutBinding ubo_layout_binding = {};
+    // binding is set in vert.shader "layout(binding = 0)"
+    ubo_layout_binding.binding         = 0;
+    ubo_layout_binding.descriptorType  = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+    ubo_layout_binding.descriptorCount = 1;
+    ubo_layout_binding.stageFlags      = VK_SHADER_STAGE_VERTEX_BIT;
+
+    VkDescriptorSetLayoutCreateInfo layout_info = {};
+    layout_info.sType        = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+    layout_info.bindingCount = 1;
+    layout_info.pBindings    = &ubo_layout_binding;
+
+    if (vkCreateDescriptorSetLayout(device, &layout_info, nullptr, &descriptor_set_layout) != VK_SUCCESS) {
+      throw std::runtime_error("failed to create descriptor set layout!");
+    }
+  }
+
+
+  void create_uniform_buffer() {
+    VkDeviceSize buffer_size = sizeof(UniformBufferObject);
+
+    uniform_buffers.resize(swap_chain_images.size());
+    uniform_buffers_memory.resize(swap_chain_images.size());
+
+    for (size_t i = 0; i < swap_chain_images.size(); i++) {
+      create_buffer(buffer_size, VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,
+          VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
+          VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
+          uniform_buffers[i], uniform_buffers_memory[i]);
+    }
+  }
+
+
+  void update_uniform_buffer(uint32_t current_image) {
+    static auto start_time = std::chrono::high_resolution_clock::now();
+
+    auto current_time = std::chrono::high_resolution_clock::now();
+    float time = std::chrono::duration<float, 
+          std::chrono::seconds::period>(current_time - start_time).count();
+
+    UniformBufferObject ubo = {};
+    ubo.model = glm::rotate(glm::mat4(1.0f), time * glm::radians(90.0f),
+        glm::vec3(0.0f, 0.0f, 1.0f));
+    ubo.view = glm::lookAt(glm::vec3(2.0f, 2.0f, 2.0f),
+        glm::vec3(0.0f, 0.0f, 0.0f), glm::vec3(0.0f, 0.0f, 1.0f));
+    ubo.proj = glm::perspective(glm::radians(45.0f),
+        swap_chain_extent.width / (float) swap_chain_extent.height,
+        0.1f, 10.0f);
+    ubo.proj[1][1] *= -1;
+
+    void* data;
+    vkMapMemory(device, uniform_buffers_memory[current_image], 0, sizeof(ubo),
+        0, &data);
+    memcpy(data, &ubo, sizeof(ubo));
+    vkUnmapMemory(device, uniform_buffers_memory[current_image]);
   }
 
 
@@ -1009,6 +1112,8 @@ private:
     } else if (result != VK_SUCCESS && result != VK_SUBOPTIMAL_KHR) {
       throw std::runtime_error("failed to acquire swap chain image!");
     }
+
+    update_uniform_buffer(image_index);
 
     VkSubmitInfo submit_info = {};
     submit_info.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
