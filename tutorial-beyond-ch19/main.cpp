@@ -208,14 +208,21 @@ private:
   
   bool framebuffer_resized = false;
 
-  std::vector<Vertex> vertices = {
-    {{ 0.0f, -0.5f}, {1.0f, 1.0f, 1.0f}},
-    {{ 0.5f,  0.5f}, {0.0f, 1.0f, 0.0f}},
-    {{-0.5f,  0.5f}, {0.0f, 0.0f, 1.0f}}
+  const std::vector<Vertex> vertices = {
+    {{-0.5f, -0.5f}, {1.0f, 0.0f, 0.0f}},
+    {{ 0.5f, -0.5f}, {0.0f, 1.0f, 0.0f}},
+    {{ 0.5f,  0.5f}, {0.0f, 0.0f, 1.0f}},
+    {{-0.5f,  0.5f}, {1.0f, 1.0f, 1.0f}}
+  };
+
+  const std::vector<uint16_t> indices = {
+    0, 1, 2, 2, 3, 0
   };
 
   VkBuffer vertex_buffer;
   VkDeviceMemory vertex_buffer_memory;
+  VkBuffer index_buffer;
+  VkDeviceMemory index_buffer_memory;
 
 
   void init_window() {
@@ -248,6 +255,7 @@ private:
     create_framebuffers();
     create_command_pool();
     create_vertex_buffer();
+    create_index_buffer();
     create_command_buffers();
     create_sync_objects();
   }
@@ -294,6 +302,9 @@ private:
     // freeing up the memory used by a buffer after the buffer itself is
     // destroyed
     vkFreeMemory(device, vertex_buffer_memory, nullptr);
+
+    vkDestroyBuffer(device, index_buffer, nullptr);
+    vkFreeMemory(device, index_buffer_memory, nullptr);
 
     for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
       vkDestroySemaphore(device, render_finished_semaphores[i], nullptr);
@@ -785,6 +796,31 @@ private:
   }
 
 
+  void create_index_buffer() {
+    VkDeviceSize buffer_size = sizeof(indices[0]) * indices.size();
+
+    VkBuffer staging_buffer;
+    VkDeviceMemory staging_buffer_memory;
+    create_buffer(buffer_size, VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+        VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
+        staging_buffer, staging_buffer_memory);
+
+    void* data;
+    vkMapMemory(device, staging_buffer_memory, 0, buffer_size, 0, &data);
+    memcpy(data, indices.data(), (size_t) buffer_size);
+    vkUnmapMemory(device, staging_buffer_memory);
+
+    create_buffer(buffer_size,
+        VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_INDEX_BUFFER_BIT,
+        VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, index_buffer, index_buffer_memory);
+
+    copy_buffer(staging_buffer, index_buffer, buffer_size);
+
+    vkDestroyBuffer(device, staging_buffer, nullptr);
+    vkFreeMemory(device, staging_buffer_memory, nullptr);
+  }
+
+
   void create_vertex_buffer() {
     // copy the vertex data to the buffer
     // map the buffer memory into the CPU accessible memory with vkMapMemory
@@ -925,8 +961,9 @@ private:
       //   -byte offsets to start reading vertex data from
       vkCmdBindVertexBuffers(command_buffers[i], 0, 1, vertex_buffers, offsets);
 
-      // we pass the number of vertices in the buffer (parameter 2)
-      vkCmdDraw(command_buffers[i], static_cast<uint32_t>(vertices.size()), 1, 0, 0);
+      vkCmdBindIndexBuffer(command_buffers[i], index_buffer, 0, VK_INDEX_TYPE_UINT16);
+
+      vkCmdDrawIndexed(command_buffers[i], static_cast<uint32_t>(indices.size()), 1, 0, 0, 0);
 
       vkCmdEndRenderPass(command_buffers[i]);
 
