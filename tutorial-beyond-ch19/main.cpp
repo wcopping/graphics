@@ -259,6 +259,9 @@ private:
   std::vector<VkBuffer> uniform_buffers;
   std::vector<VkDeviceMemory> uniform_buffers_memory;
 
+  VkDescriptorPool descriptor_pool;
+  std::vector<VkDescriptorSet> descriptor_sets;
+
 
   void init_window() {
     glfwInit();
@@ -292,7 +295,9 @@ private:
     create_command_pool();
     create_vertex_buffer();
     create_index_buffer();
-    create_uniform_buffer();
+    create_uniform_buffers();
+    create_descriptor_pool();
+    create_descriptor_sets();
     create_command_buffers();
     create_sync_objects();
   }
@@ -334,6 +339,8 @@ private:
 
   void cleanup() {
     cleanup_swap_chain();
+
+    vkDestroyDescriptorPool(device, descriptor_pool, nullptr);
 
     vkDestroyDescriptorSetLayout(device, descriptor_set_layout, nullptr);
 
@@ -710,7 +717,7 @@ private:
     rasterizer.polygonMode = VK_POLYGON_MODE_FILL;
     rasterizer.lineWidth = 1.0f;
     rasterizer.cullMode = VK_CULL_MODE_BACK_BIT;
-    rasterizer.frontFace = VK_FRONT_FACE_CLOCKWISE;
+    rasterizer.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;
     rasterizer.depthBiasEnable = VK_FALSE;
 
     VkPipelineMultisampleStateCreateInfo multisampling = {};
@@ -806,9 +813,9 @@ private:
   void create_buffer(VkDeviceSize size, VkBufferUsageFlags usage,
       VkMemoryPropertyFlags properties, VkBuffer& buffer, VkDeviceMemory& buffer_memory) {
     VkBufferCreateInfo buffer_info = {};
-    buffer_info.sType       = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-    buffer_info.size        = size;
-    buffer_info.usage       = usage;
+    buffer_info.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+    buffer_info.size  = size;
+    buffer_info.usage = usage;
     // buffers can be owned by a specific queue family or be shared between
     // multiple at the same time
     buffer_info.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
@@ -843,10 +850,11 @@ private:
   void create_descriptor_set_layout() {
     VkDescriptorSetLayoutBinding ubo_layout_binding = {};
     // binding is set in vert.shader "layout(binding = 0)"
-    ubo_layout_binding.binding         = 0;
-    ubo_layout_binding.descriptorType  = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-    ubo_layout_binding.descriptorCount = 1;
-    ubo_layout_binding.stageFlags      = VK_SHADER_STAGE_VERTEX_BIT;
+    ubo_layout_binding.binding            = 0;
+    ubo_layout_binding.descriptorType     = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+    ubo_layout_binding.pImmutableSamplers = nullptr; // optional??
+    ubo_layout_binding.descriptorCount    = 1;
+    ubo_layout_binding.stageFlags         = VK_SHADER_STAGE_VERTEX_BIT;
 
     VkDescriptorSetLayoutCreateInfo layout_info = {};
     layout_info.sType        = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
@@ -859,7 +867,64 @@ private:
   }
 
 
-  void create_uniform_buffer() {
+  // for this you need: what pool you are taking from, the number of sets you
+  // need, and a descriptor layout to base them on
+  // descriptor sets do not need to be explicitly cleaned because the
+  // they are freed when the pools are destroyed 
+  void create_descriptor_sets() {
+    std::vector<VkDescriptorSetLayout> layouts(swap_chain_images.size(), descriptor_set_layout);
+    VkDescriptorSetAllocateInfo alloc_info = {};
+    alloc_info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+    alloc_info.descriptorPool = descriptor_pool;
+    alloc_info.descriptorSetCount = static_cast<uint32_t>(swap_chain_images.size());
+    alloc_info.pSetLayouts = layouts.data();
+
+    descriptor_sets.resize(swap_chain_images.size());
+    
+    if (vkAllocateDescriptorSets(device, &alloc_info, &descriptor_sets[0]) != VK_SUCCESS) {
+      throw std::runtime_error("failed to allocate descriptor sets!");
+    }
+
+    for (size_t i = 0; i < swap_chain_images.size(); i++) {
+      VkDescriptorBufferInfo buffer_info = {};
+      buffer_info.buffer = uniform_buffers[i];
+      buffer_info.offset = 0;
+      buffer_info.range = sizeof(UniformBufferObject);
+
+      VkWriteDescriptorSet descriptor_write = {};
+      descriptor_write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+      descriptor_write.dstSet = descriptor_sets[i];
+      descriptor_write.dstBinding = 0;
+      descriptor_write.dstArrayElement = 0;
+      descriptor_write.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+      descriptor_write.descriptorCount = 1;
+      descriptor_write.pBufferInfo = &buffer_info;
+
+      vkUpdateDescriptorSets(device, 1, &descriptor_write, 0, nullptr);
+    }
+  }
+
+
+  // similar to command buffers, we can't create descriptor sets by themselves
+  // they must be obtained from descriptor set pools
+  void create_descriptor_pool() {
+    VkDescriptorPoolSize pool_size = {};
+    pool_size.type            = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+    pool_size.descriptorCount = static_cast<uint32_t>(swap_chain_images.size());
+
+    VkDescriptorPoolCreateInfo pool_info = {};
+    pool_info.sType         = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
+    pool_info.poolSizeCount = 1;
+    pool_info.pPoolSizes    = &pool_size;
+    pool_info.maxSets       = static_cast<uint32_t>(swap_chain_images.size());
+
+    if (vkCreateDescriptorPool(device, &pool_info, nullptr, &descriptor_pool) != VK_SUCCESS) {
+      throw std::runtime_error("failed to create descriptor pool!");
+    }
+  }
+
+
+  void create_uniform_buffers() {
     VkDeviceSize buffer_size = sizeof(UniformBufferObject);
 
     uniform_buffers.resize(swap_chain_images.size());
@@ -1065,6 +1130,9 @@ private:
       vkCmdBindVertexBuffers(command_buffers[i], 0, 1, vertex_buffers, offsets);
 
       vkCmdBindIndexBuffer(command_buffers[i], index_buffer, 0, VK_INDEX_TYPE_UINT16);
+
+      vkCmdBindDescriptorSets(command_buffers[i], VK_PIPELINE_BIND_POINT_GRAPHICS,
+          pipeline_layout, 0, 1, &descriptor_sets[i], 0, nullptr);
 
       vkCmdDrawIndexed(command_buffers[i], static_cast<uint32_t>(indices.size()), 1, 0, 0, 0);
 
