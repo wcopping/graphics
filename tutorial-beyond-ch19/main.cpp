@@ -108,6 +108,9 @@
 #define GLFW_INCLUDE_VULKAN
 #include <GLFW/glfw3.h>
 
+#define TINYOBJLOADER_IMPLEMENTATION
+#include <tiny_obj_loader.h>
+
 #define STB_IMAGE_IMPLEMENTATION
 #include <stb_image.h>
 
@@ -123,14 +126,20 @@
 #include <array>
 #define GLM_FORCE_RADIANS
 #define GLM_FORCE_DEPTH_ZERO_TO_ONE
+#define GLM_ENABLE_EXPERIMENTAL
+#include <glm/gtx/hash.hpp>
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>
 #include <chrono>
+#include <unordered_map>
 
 
 const int WIDTH  = 800;
 const int HEIGHT = 600;
 const int MAX_FRAMES_IN_FLIGHT = 2;
+
+const std::string MODEL_PATH = "models/chalet.obj";
+const std::string TEXTURE_PATH = "textures/chalet.jpg";
 
 const std::vector<const char*> validation_layers = {
   "VK_LAYER_LUNARG_standard_validation"
@@ -181,6 +190,12 @@ struct Vertex {
   glm::vec3 color;
   glm::vec2 tex_coord;
 
+
+  bool operator==(const Vertex& other) const {
+    return pos == other.pos && color == other.color && tex_coord == other.tex_coord;
+  }
+
+
   static VkVertexInputBindingDescription get_binding_description() {
     VkVertexInputBindingDescription binding_description = {};
     binding_description.binding = 0;
@@ -220,6 +235,18 @@ struct Vertex {
     return attribute_descriptions;
   }
 };
+
+
+// CRAZY JUJU HERE
+namespace std {
+  template <> struct hash<Vertex> {
+    size_t operator()(Vertex const& vertex) const {
+      return ((hash<glm::vec3>()(vertex.pos) ^
+             (hash<glm::vec3>()(vertex.color) << 1)) >> 1) ^
+             (hash<glm::vec2>()(vertex.tex_coord) << 1);
+    }
+  };
+}
 
 
 struct SwapChainSupportDetails {
@@ -284,22 +311,8 @@ private:
   
   bool framebuffer_resized = false;
 
-  const std::vector<Vertex> vertices = {
-    {{-0.5f, -0.5f,  0.0f}, {1.0f, 0.0f, 0.0f}, {1.0f, 0.0f}},
-    {{ 0.5f, -0.5f,  0.0f}, {0.0f, 1.0f, 0.0f}, {0.0f, 0.0f}},
-    {{ 0.5f,  0.5f,  0.0f}, {0.0f, 0.0f, 1.0f}, {0.0f, 1.0f}},
-    {{-0.5f,  0.5f,  0.0f}, {1.0f, 1.0f, 1.0f}, {1.0f, 1.0f}},
-
-    {{-0.5f, -0.5f, -0.5f}, {1.0f, 0.0f, 0.0f}, {0.0f, 0.0f}},
-    {{ 0.5f, -0.5f, -0.5f}, {0.0f, 1.0f, 0.0f}, {1.0f, 0.0f}},
-    {{ 0.5f,  0.5f, -0.5f}, {0.0f, 0.0f, 1.0f}, {1.0f, 1.0f}},
-    {{-0.5f,  0.5f, -0.5f}, {1.0f, 1.0f, 1.0f}, {0.0f, 1.0f}}
-  };
-
-  const std::vector<uint16_t> indices = {
-    0, 1, 2, 2, 3, 0,
-    4, 5, 6, 6, 7, 4
-  };
+  std::vector<Vertex> vertices;
+  std::vector<uint32_t> indices;
 
   VkBuffer vertex_buffer;
   VkDeviceMemory vertex_buffer_memory;
@@ -356,6 +369,7 @@ private:
     create_texture_image();
     create_texture_image_view();
     create_texture_sampler();
+    load_model();
     create_vertex_buffer();
     create_index_buffer();
     create_uniform_buffers();
@@ -373,6 +387,46 @@ private:
     }
 
     vkDeviceWaitIdle(device);
+  }
+
+
+  void load_model() {
+    tinyobj::attrib_t attrib;
+    std::vector<tinyobj::shape_t> shapes;
+    std::vector<tinyobj::material_t> materials;
+    std::string err;
+
+    if (!tinyobj::LoadObj(&attrib, &shapes, &materials, &err, MODEL_PATH.c_str())) {
+      throw std::runtime_error(err);
+    }
+
+    std::unordered_map<Vertex, uint32_t> unique_vertices = {};
+
+    for (const auto& shape : shapes) {
+      for (const auto& index : shape.mesh.indices) {
+        Vertex vertex = {};
+
+        vertex.pos = {
+          attrib.vertices[3 * index.vertex_index + 0],
+          attrib.vertices[3 * index.vertex_index + 1],
+          attrib.vertices[3 * index.vertex_index + 2]
+        };
+
+        vertex.tex_coord = {
+          attrib.texcoords[2 * index.texcoord_index + 0],
+          1.0f - attrib.texcoords[2 * index.texcoord_index + 1]
+        };
+
+        vertex.color = {1.0f, 1.0f, 1.0f};
+
+        if (unique_vertices.count(vertex) == 0) {
+          unique_vertices[vertex] = static_cast<uint32_t>(vertices.size());
+          vertices.push_back(vertex);
+        }
+
+        indices.push_back(unique_vertices[vertex]);
+      }
+    }
   }
 
 
@@ -1002,7 +1056,7 @@ private:
   // we load an image and upload it into a vulkan image object
   void create_texture_image() {
     int tex_width, tex_height, tex_channels;
-    stbi_uc* pixels = stbi_load("textures/texture.jpg", &tex_width, &tex_height,
+    stbi_uc* pixels = stbi_load(TEXTURE_PATH.c_str(), &tex_width, &tex_height,
         &tex_channels, STBI_rgb_alpha);
     VkDeviceSize image_size = tex_width * tex_height * 4;
 
@@ -1526,7 +1580,7 @@ private:
       //   -byte offsets to start reading vertex data from
       vkCmdBindVertexBuffers(command_buffers[i], 0, 1, vertex_buffers, offsets);
 
-      vkCmdBindIndexBuffer(command_buffers[i], index_buffer, 0, VK_INDEX_TYPE_UINT16);
+      vkCmdBindIndexBuffer(command_buffers[i], index_buffer, 0, VK_INDEX_TYPE_UINT32);
 
       vkCmdBindDescriptorSets(command_buffers[i], VK_PIPELINE_BIND_POINT_GRAPHICS,
           pipeline_layout, 0, 1, &descriptor_sets[i], 0, nullptr);
