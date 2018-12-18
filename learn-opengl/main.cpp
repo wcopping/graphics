@@ -47,7 +47,7 @@ int main()
 
     // build and compile our shader program
     // ------------------------------------
-    Shader ourShader("/home/wyatt/graphics/learn-opengl/source/shader.vs", "/home/wyatt/graphics/learn-opengl/source/shader.fs"); // you can name your shader files however you like
+    Shader ourShader("/home/wyatt/graphics/learn-opengl/shader.vs", "/home/wyatt/graphics/learn-opengl/shader.fs"); // you can name your shader files however you like
 
     // set up vertex data (and buffer(s)) and configure vertex attributes
     // ------------------------------------------------------------------
