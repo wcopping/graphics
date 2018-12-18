@@ -1,5 +1,8 @@
 #include <glad/glad.h>
 #include <GLFW/glfw3.h>
+#include <glm/glm.hpp>
+#include <glm/gtc/matrix_transform.hpp>
+#include <glm/gtc/type_ptr.hpp>
 #define STB_IMAGE_IMPLEMENTATION
 #include <stb_image.h>
 #include <shader.h>
@@ -60,6 +63,8 @@ int main()
     0, 1, 3, // first triangle
     1, 2, 3  // second triangle
   };
+
+
 
   unsigned int VBO, VAO, EBO;
   glGenVertexArrays(1, &VAO);
@@ -142,7 +147,7 @@ int main()
   // either set it manually like so:
   glUniform1i(glGetUniformLocation(our_shader.ID, "texture1"), 0);
   // or set it via the texture class
-  our_shader.setInt("texture2", 1);
+  our_shader.set_int("texture2", 1);
 
 
   // You can unbind the VAO afterwards so other VAO calls won't accidentally modify this VAO, but this rarely happens. Modifying other
@@ -168,8 +173,15 @@ int main()
     glActiveTexture(GL_TEXTURE1);
     glBindTexture(GL_TEXTURE_2D, texture2);
 
+    // transformation matrix
+    glm::mat4 trans = glm::mat4(1.0f);
+    trans = glm::translate(trans, glm::vec3(0.5f, -0.5f, 0.0f));
+    trans = glm::rotate(trans, (float)glfwGetTime(), glm::vec3(0.0, 0.0, 1.0));
+
     // render the triangle
     our_shader.use();
+    unsigned int transform_loc = glGetUniformLocation(our_shader.ID, "transform");
+    glUniformMatrix4fv(transform_loc, 1, GL_FALSE, glm::value_ptr(trans));
     glBindVertexArray(VAO);
     glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, 0);
 
