@@ -5,7 +5,7 @@ CFLAGS  = -std=c++11 -I$(PROJECT_PATH)/include -I$(PROJECT_PATH)/shaders -pedant
 LDFLAGS =  `pkg-config --static --libs glfw3`
 
 make: main.cpp
-	g++ $(CFLAGS) main.cpp glad.c -o main $(LDFLAGS)
+	g++ $(CFLAGS) main.cpp ../glad.c -o main $(LDFLAGS)
 
 .PHONY: main clean
 
