@@ -29,6 +29,9 @@ bool firstMouse = true;
 float delta_time = 0.0f;	// time between current frame and last frame
 float last_frame = 0.0f;
 
+// lighting
+glm::vec3 light_pos(1.2f, 1.0f, 2.0f);
+
 int main()
 {
   // glfw: initialize and configure
@@ -197,13 +200,18 @@ int main()
 
     // be sure to activate shader when setting uniforms/drawing objects
     lighting_shader.use();
-    lighting_shader.set_vec3("light.direction", -0.2f, -1.0f, -0.3f);
+    lighting_shader.set_vec3("light.position", camera.Position);
+    lighting_shader.set_vec3("light.direction", camera.Front);
+    lighting_shader.set_float("light.cut_off", glm::cos(glm::radians(12.5f)));
     lighting_shader.set_vec3("view_pos",  camera.Position);
 
     // light properties
-    lighting_shader.set_vec3("light.ambient",  0.2f, 0.2f, 0.2f);
-    lighting_shader.set_vec3("light.diffuse",  0.5f, 0.5f, 0.5f);
+    lighting_shader.set_vec3("light.ambient",  0.1f, 0.1f, 0.1f);
+    lighting_shader.set_vec3("light.diffuse",  0.8f, 0.8f, 0.8f);
     lighting_shader.set_vec3("light.specular", 1.0f, 1.0f, 1.0f);
+    lighting_shader.set_float("light.constant",  1.0f);
+    lighting_shader.set_float("light.linear",    0.09f);
+    lighting_shader.set_float("light.quadratic", 0.032f);
 
     // material properties
     lighting_shader.set_float("material.shininess", 32.0f);
